@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" type="image/gif" href="limbo-keys.gif">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LIMBO.GD</title>
+
+<style>
+* {
+    box-sizing: border-box;
+}
+
+html, body {
+    margin: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #000;
+    color: #fff;
+    font-family: Arial, sans-serif;
+    user-select: none;
+}
+
+body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#game {
+    position: relative;
+    width: min(100vw, 100vh);
+    height: min(100vw, 100vh);
+    max-width: 800px;
+    max-height: 800px;
+    background: #080808;
+    border: 2px solid #222;
+}
+
+#title {
+    position: absolute;
+    top: 4%;
+    width: 100%;
+    text-align: center;
+    font-size: 26px;
+    letter-spacing: 10px;
+    color: #bbb;
+}
+
+#grid {
+    position: absolute;
+    left: 7%;
+    top: 15%;
+    width: 86%;
+    height: 72%;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    grid-template-rows: repeat(3, 1fr);
+    gap: 5px;
+}
+
+.slot {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+    min-height: 0;
+    background: #050505;
+    border: 1px solid #171717;
+}
+
+.slot.empty {
+    background: transparent;
+    border: none;
+}
+
+.slot.playable {
+    cursor: pointer;
+}
+
+.slot.playable:hover {
+    background: #111;
+}
+
+.key {
+    width: 65%;
+    height: 65%;
+    object-fit: contain;
+    display: block;
+    pointer-events: none;
+    transition: filter 1s ease, transform 0.35s ease;
+}
+
+.key.correct {
+    filter: sepia(1) saturate(8) hue-rotate(65deg) brightness(1.3);
+}
+
+#message {
+    position: absolute;
+    bottom: 4%;
+    width: 100%;
+    text-align: center;
+    font-size: 12px;
+    letter-spacing: 3px;
+    color: #888;
+}
+
+#startScreen,
+#blackout,
+#winScreen {
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    background: #000;
+    text-align: center;
+}
+
+#blackout,
+#winScreen {
+    display: none;
+}
+
+#startButton,
+#restartButton {
+    padding: 15px 28px;
+    background: #080808;
+    color: #ddd;
+    border: 1px solid #555;
+    font-size: 15px;
+    letter-spacing: 4px;
+    cursor: pointer;
+}
+
+#startButton:hover,
+#restartButton:hover {
+    background: #222;
+}
+
+.smallText {
+    margin-top: 20px;
+    color: #666;
+    font-size: 11px;
+    letter-spacing: 2px;
+}
+
+#winText {
+    color: #bbb;
+    font-size: 25px;
+    letter-spacing: 7px;
+    margin-bottom: 30px;
+}
+
+@media (max-width: 500px) {
+    #title {
+        font-size: 18px;
+        letter-spacing: 6px;
+    }
+
+    #message {
+        font-size: 9px;
+        letter-spacing: 1px;
+    }
+}
+</style>
+</head>
+
+<body>
+
+<div id="game">
+
+    <div id="title">LIMBO</div>
+
+    <div id="grid">
+        <div class="slot" data-slot="0"></div>
+        <div class="slot" data-slot="1"></div>
+        <div class="slot" data-slot="2"></div>
+
+        <div class="slot" data-slot="3"></div>
+        <div class="slot empty"></div>
+        <div class="slot" data-slot="4"></div>
+
+        <div class="slot" data-slot="5"></div>
+        <div class="slot" data-slot="6"></div>
+        <div class="slot" data-slot="7"></div>
+    </div>
+
+    <div id="message">WATCH THE GREEN KEY</div>
+
+</div>
+
+<div id="startScreen">
+    <button id="startButton">START</button>
+    <div class="smallText">REMEMBER THE CORRECT KEY</div>
+</div>
+
+<div id="blackout"></div>
+
+<div id="winScreen">
+    <div id="winText">CORRECT</div>
+    <button id="restartButton">PLAY AGAIN</button>
+</div>
+
+<audio id="music" preload="auto" src="limbo-keys.mp3"></audio>
+
+<script>
+(function () {
+
+    var grid = document.getElementById("grid");
+    var slots = grid.getElementsByClassName("slot");
+    var message = document.getElementById("message");
+    var music = document.getElementById("music");
+
+    var startScreen = document.getElementById("startScreen");
+    var startButton = document.getElementById("startButton");
+    var blackout = document.getElementById("blackout");
+    var winScreen = document.getElementById("winScreen");
+    var restartButton = document.getElementById("restartButton");
+
+    var keys = [];
+    var shuffleTimer = null;
+    var shuffleActive = false;
+    var gameOver = false;
+    var started = false;
+    var musicEnded = false;
+    var shuffleStarted = false;
+
+    /*
+     * Create eight individual copies of the key sprite.
+     */
+
+    function createKeys() {
+        keys = [];
+
+        for (var i = 0; i < slots.length; i++) {
+
+            if (slots[i].className.indexOf("empty") !== -1) {
+                continue;
+            }
+
+            var img = document.createElement("img");
+
+            img.src = "limbo-keys.gif";
+            img.alt = "Key";
+            img.className = "key";
+            img.setAttribute("data-correct", "no");
+
+            slots[i].appendChild(img);
+            keys.push(img);
+        }
+
+        /*
+         * Randomly choose the correct key.
+         */
+
+        var correctIndex = Math.floor(Math.random() * keys.length);
+
+        keys[correctIndex].setAttribute("data-correct", "yes");
+    }
+
+    /*
+     * Exchange the positions of two key elements.
+     */
+
+    function swapKeys(indexA, indexB) {
+
+        if (indexA === indexB) {
+            return;
+        }
+
+        var keyA = slots[indexA].getElementsByTagName("img")[0];
+        var keyB = slots[indexB].getElementsByTagName("img")[0];
+
+        if (!keyA || !keyB) {
+            return;
+        }
+
+        var rectA = keyA.getBoundingClientRect();
+        var rectB = keyB.getBoundingClientRect();
+
+        var dx = rectA.left - rectB.left;
+        var dy = rectA.top - rectB.top;
+
+        /*
+         * Move the actual elements.
+         * The correct key keeps its identity.
+         */
+
+        slots[indexA].appendChild(keyB);
+        slots[indexB].appendChild(keyA);
+
+        keyA.style.transition = "none";
+        keyB.style.transition = "none";
+
+        keyA.style.transform =
+            "translate(" + dx + "px," + dy + "px)";
+
+        keyB.style.transform =
+            "translate(" + (-dx) + "px," + (-dy) + "px)";
+
+        keyA.offsetHeight;
+
+        keyA.style.transition = "transform 0.35s ease";
+        keyB.style.transition = "transform 0.35s ease";
+
+        keyA.style.transform = "translate(0,0)";
+        keyB.style.transform = "translate(0,0)";
+    }
+
+    /*
+     * Perform several swaps per shuffle step.
+     */
+
+    function shuffleStep() {
+
+        if (!shuffleActive || gameOver) {
+            return;
+        }
+
+        for (var i = 0; i < 3; i++) {
+
+            var a = Math.floor(Math.random() * 8);
+            var b = Math.floor(Math.random() * 8);
+
+            while (b === a) {
+                b = Math.floor(Math.random() * 8);
+            }
+
+            swapKeys(a, b);
+        }
+    }
+
+    /*
+     * Music and shuffling begin together.
+     */
+
+    function startShuffle() {
+
+        if (shuffleStarted || musicEnded || gameOver) {
+            return;
+        }
+
+        shuffleStarted = true;
+        shuffleActive = true;
+
+        message.innerHTML = "WATCH THE KEYS";
+
+        /*
+         * Start the MP3 only when shuffling begins.
+         */
+
+        music.currentTime = 0;
+
+        var playPromise = music.play();
+
+        if (playPromise && playPromise.catch) {
+            playPromise.catch(function () {
+                message.innerHTML = "MUSIC COULD NOT START";
+            });
+        }
+
+        shuffleStep();
+
+        shuffleTimer = setInterval(shuffleStep, 450);
+    }
+
+    /*
+     * Stop shuffling when the MP3 ends.
+     */
+
+    function stopShuffle() {
+
+        shuffleActive = false;
+
+        if (shuffleTimer !== null) {
+            clearInterval(shuffleTimer);
+            shuffleTimer = null;
+        }
+
+        if (!gameOver) {
+            message.innerHTML = "CHOOSE THE CORRECT KEY";
+            enableSelection();
+        }
+    }
+
+    /*
+     * Enable clicks after the music has ended.
+     */
+
+    function enableSelection() {
+
+        for (var i = 0; i < slots.length; i++) {
+
+            if (slots[i].className.indexOf("empty") !== -1) {
+                continue;
+            }
+
+            slots[i].className = "slot playable";
+            slots[i].onclick = chooseKey;
+        }
+    }
+
+    function disableSelection() {
+
+        for (var i = 0; i < slots.length; i++) {
+
+            if (slots[i].className.indexOf("empty") !== -1) {
+                continue;
+            }
+
+            slots[i].className = "slot";
+            slots[i].onclick = null;
+        }
+    }
+
+    /*
+     * Handle the player's choice.
+     */
+
+    function chooseKey() {
+
+        if (gameOver || shuffleActive || !musicEnded) {
+            return;
+        }
+
+        var selected = this.getElementsByTagName("img")[0];
+
+        if (!selected) {
+            return;
+        }
+
+        gameOver = true;
+        disableSelection();
+
+        if (selected.getAttribute("data-correct") === "yes") {
+
+            message.innerHTML = "";
+            winScreen.style.display = "flex";
+
+        } else {
+
+            message.innerHTML = "";
+            blackout.style.display = "flex";
+
+            /*
+             * Browsers may refuse to close a tab
+             * that was not opened by this script.
+             */
+
+            try {
+                window.close();
+            } catch (error) {
+                // The black screen remains.
+            }
+        }
+    }
+
+    /*
+     * START button:
+     * Reveal the correct key, fade it, then shuffle.
+     */
+
+    function startGame() {
+
+        if (started) {
+            return;
+        }
+
+        started = true;
+        startScreen.style.display = "none";
+        disableSelection();
+
+        var correctKey = null;
+
+        for (var i = 0; i < keys.length; i++) {
+
+            if (keys[i].getAttribute("data-correct") === "yes") {
+                correctKey = keys[i];
+                break;
+            }
+        }
+
+        message.innerHTML = "REMEMBER THE GREEN KEY";
+
+        if (correctKey) {
+            correctKey.className = "key correct";
+        }
+
+        /*
+         * The music does NOT start here.
+         * It starts later, when startShuffle() runs.
+         */
+
+        setTimeout(function () {
+
+            if (correctKey) {
+                correctKey.className = "key";
+            }
+
+            message.innerHTML = "GET READY";
+
+            setTimeout(function () {
+
+                if (!gameOver && !musicEnded) {
+                    startShuffle();
+                }
+
+            }, 1000);
+
+        }, 1500);
+    }
+
+    /*
+     * Natural end of the MP3 stops the shuffle.
+     */
+
+    music.addEventListener("ended", function () {
+
+        musicEnded = true;
+        stopShuffle();
+
+    });
+
+    /*
+     * Handle missing or unreadable audio.
+     */
+
+    music.addEventListener("error", function () {
+
+        if (started && !musicEnded) {
+
+            musicEnded = true;
+            stopShuffle();
+
+            message.innerHTML = "AUDIO ERROR - CHOOSE A KEY";
+        }
+
+    });
+
+    /*
+     * Reset everything for another round.
+     */
+
+    function restartGame() {
+
+        if (shuffleTimer !== null) {
+            clearInterval(shuffleTimer);
+        }
+
+        music.pause();
+
+        try {
+            music.currentTime = 0;
+        } catch (error) {
+        }
+
+        shuffleTimer = null;
+        shuffleActive = false;
+        gameOver = false;
+        started = false;
+        musicEnded = false;
+        shuffleStarted = false;
+
+        blackout.style.display = "none";
+        winScreen.style.display = "none";
+        startScreen.style.display = "flex";
+
+        message.innerHTML = "WATCH THE GREEN KEY";
+
+        for (var i = 0; i < slots.length; i++) {
+
+            if (slots[i].className.indexOf("empty") !== -1) {
+                continue;
+            }
+
+            slots[i].innerHTML = "";
+            slots[i].className = "slot";
+            slots[i].onclick = null;
+        }
+
+        createKeys();
+    }
+
+    startButton.onclick = startGame;
+    restartButton.onclick = restartGame;
+
+    /*
+     * Build the room.
+     */
+
+    createKeys();
+
+})();
+</script>
+
+</body>
+</html>
